@@ -3,13 +3,16 @@ package com.banyunlai.low_camera
 import android.Manifest
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.widget.Toast
 import java.io.FileOutputStream
@@ -48,6 +51,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -584,13 +588,43 @@ fun CameraPreview(): ImageCapture? {
 
 @Composable
 fun LibraryScreen(modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(text = "Library Screen")
-        Text(text = "Photo library functionality will be implemented here")
+    val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        // 使用ACTION_OPEN_DOCUMENT_TREE来打开文件管理器
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+        
+        // 设置初始目录为Pictures/LowCamera
+        val initialUri = Uri.parse("content://com.android.externalstorage.documents/tree/primary:Pictures/LowCamera")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, initialUri)
+        }
+        
+        // 添加必要的标志
+        intent.addFlags(
+            Intent.FLAG_ACTIVITY_NEW_TASK or
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or
+            Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        )
+        
+        // 尝试打开系统文件管理器
+        try {
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            // 如果失败，尝试使用另一种方式
+            val fallbackIntent = Intent(Intent.ACTION_VIEW).apply {
+                this.data = initialUri
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            try {
+                context.startActivity(fallbackIntent)
+            } catch (fallbackException: Exception) {
+                Toast.makeText(context, "无法打开文件管理器", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    // 占位布局（跳转后当前页面无需显示内容）
+    Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Text(text = "正在打开文件管理器...")
     }
 }
 
