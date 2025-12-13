@@ -177,11 +177,13 @@ fun CameraScreen(modifier: Modifier = Modifier) {
         }
     )
 
-    // 检查相机权限
-    if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-        requestPermissionLauncher.launch(Manifest.permission.CAMERA)
-    } else {
-        hasCameraPermission = true
+    // 检查相机权限（在LaunchedEffect中执行副作用操作）
+    LaunchedEffect(Unit) {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissionLauncher.launch(Manifest.permission.CAMERA)
+        } else {
+            hasCameraPermission = true
+        }
     }
 
     Column(modifier = modifier.fillMaxSize()) {
