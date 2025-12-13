@@ -1,15 +1,26 @@
 package com.banyunlai.low_camera
 
 import android.Manifest
+import android.content.ContentValues
+import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.os.Build
 import android.os.Bundle
+import android.os.ParcelFileDescriptor
+import android.provider.MediaStore
 import android.widget.Toast
+import java.io.FileOutputStream
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview as CameraPreview // 给 CameraX Preview 起别名
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -110,6 +121,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     val lifecycleOwner = LocalLifecycleOwner.current
     var fileName by remember { mutableStateOf(TextFieldValue("photo_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(System.currentTimeMillis()))) }
     var hasCameraPermission by remember { mutableStateOf(false) }
+    var imageCapture: ImageCapture? by remember { mutableStateOf(null) }
 
     // 相机权限请求
     val requestPermissionLauncher = rememberLauncherForActivityResult(
@@ -136,7 +148,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 .background(Color.Black)
         ) {
             if (hasCameraPermission) {
-                CameraPreview()
+                imageCapture = CameraPreview()
             } else {
                 Text(
                     text = "请允许相机权限",
@@ -146,17 +158,6 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             }
         }
 
-        // 按键（10%高度）
-        Box(modifier = Modifier.weight(0.1f).fillMaxWidth().padding(horizontal = 16.dp)) {
-            Button(
-                onClick = {
-                    Toast.makeText(context, "拍照按钮被点击", Toast.LENGTH_SHORT).show()
-                },
-                modifier = Modifier.fillMaxSize()
-            ) {
-                Text(text = "拍照")
-            }
-        }
 
         // 文字输入框（20%高度）
         Box(modifier = Modifier.weight(0.2f).fillMaxWidth().padding(16.dp)) {
@@ -168,14 +169,154 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 modifier = Modifier.fillMaxSize()
             )
         }
+
+        // 按键（10%高度）
+        Box(modifier = Modifier.weight(0.1f).fillMaxWidth().padding(horizontal = 16.dp)) {
+            Button(
+                onClick = {
+                    if (imageCapture != null) {
+                        takePhoto(imageCapture, fileName.text, context)
+                    } else {
+                        Toast.makeText(context, "无法拍照，请检查相机权限", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            ) {
+                Text(text = "拍照")
+            }
+        }
+    }
+}
+
+private fun takePhoto(imageCapture: ImageCapture?, fileName: String, context: Context) {
+    imageCapture?.let {
+        // 创建输出选项
+        val contentValues = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/LowCamera")
+            }
+        }
+
+        // 创建输出文件
+        val outputOptions = ImageCapture.OutputFileOptions.Builder(
+            context.contentResolver,
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            contentValues
+        ).build()
+
+        // 执行拍照
+        it.takePicture(
+            outputOptions,
+            ContextCompat.getMainExecutor(context),
+            object : ImageCapture.OnImageSavedCallback {
+                override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
+                    // 获取保存的照片Uri
+                    val imageUri = outputFileResults.savedUri
+                    if (imageUri != null) {
+                        try {
+                            // 使用ParcelFileDescriptor直接操作文件
+                            val parcelFileDescriptor = context.contentResolver.openFileDescriptor(imageUri, "rw")
+                            parcelFileDescriptor?.use { pfd ->
+                                // 打开输入流加载原始照片
+                                val inputStream = context.contentResolver.openInputStream(imageUri)
+                                inputStream?.use { isStream ->
+                                    val originalBitmap = BitmapFactory.decodeStream(isStream)
+                                    
+                                    // 计算缩小后的尺寸（1/4长1/4宽）
+                                    val scaledWidth = originalBitmap.width / 2
+                                    val scaledHeight = originalBitmap.height / 2
+                                    
+                                    // 创建缩小后的Bitmap
+                                    val scaledBitmap = Bitmap.createScaledBitmap(
+                                        originalBitmap,
+                                        scaledWidth,
+                                        scaledHeight,
+                                        true // 使用双线性滤波提升质量
+                                    )
+                                    
+                                    // 创建旋转Matrix
+                                    val matrix = Matrix()
+                                    matrix.postRotate(90f) // 顺时针旋转90度
+                                    
+                                    // 创建旋转后的Bitmap
+                                    val rotatedBitmap = Bitmap.createBitmap(
+                                        scaledBitmap,
+                                        0,
+                                        0,
+                                        scaledWidth,
+                                        scaledHeight,
+                                        matrix,
+                                        true
+                                    )
+                                    
+                                    // 关闭输入流
+                                    isStream.close()
+                                    
+                                    // 打开输出流并截断文件
+                                    val fileOutputStream = FileOutputStream(pfd.fileDescriptor)
+                                    fileOutputStream.use {
+                                        // 截断文件到0长度
+                                        it.channel.truncate(0)
+                                        
+                                        // 压缩并写入旋转后的图片
+                                        rotatedBitmap.compress(Bitmap.CompressFormat.JPEG, 65, it)
+                                        it.flush()
+                                    }
+                                    
+                                    // 释放旋转后的Bitmap资源
+                                    rotatedBitmap.recycle()
+                                    
+                                    // 释放资源
+                                    originalBitmap.recycle()
+                                    scaledBitmap.recycle()
+                                    
+                                    Toast.makeText(
+                                        context,
+                                        "照片已保存为: $fileName (${scaledWidth}x${scaledHeight})",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                            Toast.makeText(
+                                context,
+                                "缩放照片失败: ${e.message}",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    } else {
+                        Toast.makeText(
+                            context,
+                            "照片已保存，但无法获取文件信息",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+
+                override fun onError(exception: ImageCaptureException) {
+                    Toast.makeText(
+                        context,
+                        "拍照失败: ${exception.message}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    exception.printStackTrace()
+                }
+            }
+        )
+    } ?: run {
+        Toast.makeText(context, "相机未初始化", Toast.LENGTH_SHORT).show()
     }
 }
 
 @Composable
-fun CameraPreview() {
+fun CameraPreview(): ImageCapture? {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val previewView = remember { PreviewView(context) }
+    val imageCapture = remember { ImageCapture.Builder().build() }
     
     // 初始化相机
     remember {
@@ -186,7 +327,7 @@ fun CameraPreview() {
             // 配置预览
             val preview = CameraPreview.Builder().build()
             preview.setSurfaceProvider(previewView.surfaceProvider)
-            
+             
             // 选择相机（后置）
             val cameraSelector = CameraSelector.Builder()
                 .requireLensFacing(CameraSelector.LENS_FACING_BACK)
@@ -198,7 +339,8 @@ fun CameraPreview() {
                 cameraProvider.bindToLifecycle(
                     lifecycleOwner,
                     cameraSelector,
-                    preview
+                    preview,
+                    imageCapture
                 )
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -211,6 +353,8 @@ fun CameraPreview() {
         factory = { previewView },
         modifier = Modifier.fillMaxSize()
     )
+    
+    return imageCapture
 }
 
 @Composable
