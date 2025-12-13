@@ -28,6 +28,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -42,6 +43,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -55,6 +60,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewScreenSizes
@@ -115,13 +121,46 @@ enum class AppDestinations(
     LIBRARY("Library", Icons.Default.AccountBox),
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CameraScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    var fileName by remember { mutableStateOf(TextFieldValue("photo_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(System.currentTimeMillis()))) }
+    // 将文件名拆分为地址和目的
+    var address by remember { mutableStateOf(TextFieldValue("")) }
+    var purpose by remember { mutableStateOf(TextFieldValue("")) }
     var hasCameraPermission by remember { mutableStateOf(false) }
     var imageCapture: ImageCapture? by remember { mutableStateOf(null) }
+    
+    // 年月日选择状态
+    val currentDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(System.currentTimeMillis())
+    val year = currentDate.substring(0, 4).toInt()
+    val month = currentDate.substring(5, 7).toInt()
+    val day = currentDate.substring(8, 10).toInt()
+    
+    var selectedYear by remember { mutableStateOf(year) }
+    var selectedMonth by remember { mutableStateOf(month) }
+    var selectedDay by remember { mutableStateOf(day) }
+    
+    // 金额输入状态
+    var amount by remember { mutableStateOf(TextFieldValue("")) }
+    
+    // 生成年份选项（近10年）
+    val years = (year - 1)..(year + 1)
+    // 生成月份选项（1-12）
+    val months = 1..12
+    // 生成日期选项（根据月份和年份确定天数）
+    val daysInMonth = when (selectedMonth) {
+        4, 6, 9, 11 -> 30
+        2 -> if (selectedYear % 4 == 0 && (selectedYear % 100 != 0 || selectedYear % 400 == 0)) 29 else 28
+        else -> 31
+    }
+    val days = 1..daysInMonth
+    
+    // 确保选择的日期在有效范围内
+    if (selectedDay > daysInMonth) {
+        selectedDay = daysInMonth
+    }
 
     // 相机权限请求
     val requestPermissionLauncher = rememberLauncherForActivityResult(
@@ -158,24 +197,75 @@ fun CameraScreen(modifier: Modifier = Modifier) {
             }
         }
 
+        // 年月日下拉选单区域（8%高度）
+        Box(modifier = Modifier.weight(0.1f).fillMaxWidth().padding(8.dp)) {
+            Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                // 年份选择
+                YearDropdown(
+                    selectedYear = selectedYear, 
+                    onYearSelected = { selectedYear = it }, 
+                    years = years,
+                    modifier = Modifier.weight(1f)
+                )
+                // 月份选择
+                MonthDropdown(
+                    selectedMonth = selectedMonth, 
+                    onMonthSelected = { selectedMonth = it }, 
+                    months = months,
+                    modifier = Modifier.weight(1f)
+                )
+                // 日期选择
+                DayDropdown(
+                    selectedDay = selectedDay, 
+                    onDaySelected = { selectedDay = it }, 
+                    days = days,
+                    modifier = Modifier.weight(1f)
+                )
 
-        // 文字输入框（20%高度）
-        Box(modifier = Modifier.weight(0.2f).fillMaxWidth().padding(16.dp)) {
-            OutlinedTextField(
-                value = fileName,
-                onValueChange = { fileName = it },
-                label = { Text("输入文件名") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
-                modifier = Modifier.fillMaxSize()
-            )
+            }
+        }
+
+        // 地址和目的输入框（12%高度）
+        Box(modifier = Modifier.weight(0.12f).fillMaxWidth().padding(8.dp)) {
+            Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                // 地址输入框
+                OutlinedTextField(
+                    value = address,
+                    onValueChange = { address = it },
+                    label = { Text("起始地址") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                    modifier = Modifier.weight(1f).padding(horizontal = 4.dp)
+                )
+                // 目的输入框
+                OutlinedTextField(
+                    value = purpose,
+                    onValueChange = { purpose = it },
+                    label = { Text("目的") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                    modifier = Modifier.weight(1f).padding(horizontal = 4.dp)
+                )
+                // 金额输入框
+                OutlinedTextField(
+                    value = amount,
+                    onValueChange = { amount = it },
+                    label = { Text("金额")},
+                    modifier = Modifier.weight(0.5f).padding(horizontal = 4.dp),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                )
+            }
         }
 
         // 按键（10%高度）
-        Box(modifier = Modifier.weight(0.1f).fillMaxWidth().padding(horizontal = 16.dp)) {
+        Box(modifier = Modifier.weight(0.08f).fillMaxWidth().padding(horizontal = 8.dp)) {
             Button(
                 onClick = {
                     if (imageCapture != null) {
-                        takePhoto(imageCapture, fileName.text, context)
+                        // 获取当前的分钟和秒数
+                        val currentTime = SimpleDateFormat("mmss", Locale.US).format(System.currentTimeMillis())
+                        // 组合文件名：选择年月日_当前的分钟秒数_目的_地址_金额
+                        val formattedDate = "${selectedYear}${selectedMonth.toString().padStart(2, '0')}${selectedDay.toString().padStart(2, '0')}"
+                        val combinedFileName = "${formattedDate}${currentTime}_${purpose.text}_${address.text.replace(" ", "_")}_${amount.text}"
+                        takePhoto(imageCapture, combinedFileName.replace(" ", ""), context)
                     } else {
                         Toast.makeText(context, "无法拍照，请检查相机权限", Toast.LENGTH_SHORT).show()
                     }
@@ -183,6 +273,141 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 modifier = Modifier.fillMaxSize()
             ) {
                 Text(text = "拍照")
+            }
+        }
+    }
+}
+
+// 年份下拉选择器
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun YearDropdown(
+    selectedYear: Int, 
+    onYearSelected: (Int) -> Unit, 
+    years: IntRange,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = !expanded },
+        modifier = modifier.padding(horizontal = 4.dp)
+    ) {
+        OutlinedTextField(
+            value = selectedYear.toString(),
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("年", fontSize = 12.sp) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier.fillMaxSize().menuAnchor(),
+            textStyle = TextStyle(fontSize = 14.sp)
+        )
+        
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            years.forEach { year ->
+                DropdownMenuItem(
+                    text = { Text(year.toString(), fontSize = 14.sp) },
+                    onClick = {
+                        onYearSelected(year)
+                        expanded = false
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+    }
+}
+
+// 月份下拉选择器
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MonthDropdown(
+    selectedMonth: Int, 
+    onMonthSelected: (Int) -> Unit, 
+    months: IntRange,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = !expanded },
+        modifier = modifier.padding(horizontal = 4.dp)
+    ) {
+        OutlinedTextField(
+            value = selectedMonth.toString().padStart(2, '0'),
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("月", fontSize = 12.sp) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier.fillMaxSize().menuAnchor(),
+            textStyle = TextStyle(fontSize = 14.sp)
+        )
+        
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            months.forEach { month ->
+                DropdownMenuItem(
+                    text = { Text(month.toString().padStart(2, '0'), fontSize = 14.sp) },
+                    onClick = {
+                        onMonthSelected(month)
+                        expanded = false
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+    }
+}
+
+// 日期下拉选择器
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DayDropdown(
+    selectedDay: Int, 
+    onDaySelected: (Int) -> Unit, 
+    days: IntRange,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = !expanded },
+        modifier = modifier.padding(horizontal = 4.dp)
+    ) {
+        OutlinedTextField(
+            value = selectedDay.toString().padStart(2, '0'),
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("日", fontSize = 12.sp) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier.fillMaxSize().menuAnchor(),
+            textStyle = TextStyle(fontSize = 14.sp)
+        )
+        
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            days.forEach { day ->
+                DropdownMenuItem(
+                    text = { Text(day.toString().padStart(2, '0'), fontSize = 14.sp) },
+                    onClick = {
+                        onDaySelected(day)
+                        expanded = false
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
     }
