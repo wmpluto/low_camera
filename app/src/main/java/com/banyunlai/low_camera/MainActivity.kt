@@ -17,10 +17,8 @@ import android.provider.MediaStore
 import android.widget.Toast
 import java.io.FileOutputStream
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -74,6 +72,31 @@ import com.banyunlai.low_camera.ui.theme.Low_cameraTheme
 import java.text.SimpleDateFormat
 import java.util.Locale
 import androidx.compose.ui.unit.*
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material.icons.filled.DateRange
+import java.util.Calendar
+import java.util.Date
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
+import android.content.ContentUris
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -148,12 +171,15 @@ fun CameraScreen(modifier: Modifier = Modifier) {
     
     // 金额输入状态
     var amount by remember { mutableStateOf(TextFieldValue("")) }
-    
+
+    // 控制日历对话框显示
+    var showDatePicker by remember { mutableStateOf(false) }
+
     // 生成年份选项（近10年）
     val years = (year - 1)..(year + 1)
     // 生成月份选项（1-12）
     val months = 1..12
-    // 生成日期选项（根据月份和年份确定天数）
+    // 生成日期选项（根据月份 and 年份确定天数）
     val daysInMonth = when (selectedMonth) {
         4, 6, 9, 11 -> 30
         2 -> if (selectedYear % 4 == 0 && (selectedYear % 100 != 0 || selectedYear % 400 == 0)) 29 else 28
@@ -228,7 +254,32 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                     modifier = Modifier.weight(1f)
                 )
 
+                // 日历选择按钮
+                IconButton(
+                    onClick = { showDatePicker = true },
+                    modifier = Modifier.align(Alignment.CenterVertically)
+                ) {
+                    Icon(Icons.Default.DateRange, contentDescription = "选择日期")
+                }
             }
+        }
+
+        if (showDatePicker) {
+            DatePickerModal(
+                initialSelectedDateMillis = Calendar.getInstance().apply {
+                    set(selectedYear, selectedMonth - 1, selectedDay)
+                }.timeInMillis,
+                onDateSelected = { millis ->
+                    millis?.let {
+                        val cal = Calendar.getInstance().apply { timeInMillis = it }
+                        selectedYear = cal.get(Calendar.YEAR)
+                        selectedMonth = cal.get(Calendar.MONTH) + 1
+                        selectedDay = cal.get(Calendar.DAY_OF_MONTH)
+                    }
+                    showDatePicker = false
+                },
+                onDismiss = { showDatePicker = false }
+            )
         }
 
         // 地址和目的输入框（12%高度）
@@ -281,6 +332,36 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 Text(text = "拍照")
             }
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DatePickerModal(
+    initialSelectedDateMillis: Long,
+    onDateSelected: (Long?) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val datePickerState = rememberDatePickerState(
+        initialSelectedDateMillis = initialSelectedDateMillis
+    )
+
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = {
+                onDateSelected(datePickerState.selectedDateMillis)
+            }) {
+                Text("确定")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        }
+    ) {
+        DatePicker(state = datePickerState)
     }
 }
 
@@ -588,45 +669,234 @@ fun CameraPreview(): ImageCapture? {
     return imageCapture
 }
 
+data class ImageItem(
+    val id: Long,
+    val uri: Uri,
+    val name: String,
+    val dateAdded: Long
+)
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun LibraryScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    LaunchedEffect(Unit) {
-        // 使用ACTION_OPEN_DOCUMENT_TREE来打开文件管理器
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
-        
-        // 设置初始目录为Pictures/LowCamera
-        val initialUri = Uri.parse("content://com.android.externalstorage.documents/tree/primary:Pictures/LowCamera")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, initialUri)
+    val images = remember { mutableStateListOf<ImageItem>() }
+    
+    var selectedImageForPreview by remember { mutableStateOf<ImageItem?>(null) }
+    var selectedImageForMenu by remember { mutableStateOf<ImageItem?>(null) }
+    var targetImageForAction by remember { mutableStateOf<ImageItem?>(null) }
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var newNameText by remember { mutableStateOf("") }
+
+    // 从 MediaStore 加载图片
+    fun loadImages() {
+        images.clear()
+        val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+        } else {
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI
         }
-        
-        // 添加必要的标志
-        intent.addFlags(
-            Intent.FLAG_ACTIVITY_NEW_TASK or
-            Intent.FLAG_GRANT_READ_URI_PERMISSION or
-            Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+
+        val projection = arrayOf(
+            MediaStore.Images.Media._ID,
+            MediaStore.Images.Media.DISPLAY_NAME,
+            MediaStore.Images.Media.DATE_ADDED
         )
+
+        // 筛选 Pictures/LowCamera 目录下的图片
+        val selection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ? OR ${MediaStore.Images.Media.DISPLAY_NAME} LIKE ?"
+        } else {
+            "${MediaStore.Images.Media.DATA} LIKE ?"
+        }
+        val selectionArgs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            arrayOf("%Pictures/LowCamera%", "%.jpg%") 
+        } else {
+            arrayOf("%LowCamera%")
+        }
         
-        // 尝试打开系统文件管理器
+        val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
+
         try {
-            context.startActivity(intent)
-        } catch (e: Exception) {
-            // 如果失败，尝试使用另一种方式
-            val fallbackIntent = Intent(Intent.ACTION_VIEW).apply {
-                this.data = initialUri
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.contentResolver.query(collection, projection, selection, selectionArgs, sortOrder)?.use { cursor ->
+                val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
+                val dateColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
+
+                while (cursor.moveToNext()) {
+                    val id = cursor.getLong(idColumn)
+                    val name = cursor.getString(nameColumn)
+                    val dateAdded = cursor.getLong(dateColumn)
+                    val contentUri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
+                    images.add(ImageItem(id, contentUri, name, dateAdded))
+                }
             }
-            try {
-                context.startActivity(fallbackIntent)
-            } catch (fallbackException: Exception) {
-                Toast.makeText(context, "无法打开文件管理器", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    LaunchedEffect(Unit) {
+        loadImages()
+    }
+
+    Box(modifier = modifier.fillMaxSize()) {
+        if (images.isEmpty()) {
+            Text(
+                text = "相册中暂无照片",
+                modifier = Modifier.align(Alignment.Center)
+            )
+        } else {
+            // 网格视图排列图片，一行2张
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                modifier = Modifier.fillMaxSize().padding(4.dp)
+            ) {
+                items(images, key = { it.id }) { imageItem ->
+                    Box(
+                        modifier = Modifier
+                            .padding(4.dp)
+                            .aspectRatio(1f)
+                    ) {
+                        AsyncImage(
+                            model = imageItem.uri,
+                            contentDescription = imageItem.name,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .combinedClickable(
+                                    onClick = { selectedImageForPreview = imageItem },
+                                    onLongClick = { selectedImageForMenu = imageItem }
+                                )
+                        )
+                        
+                        if (selectedImageForMenu == imageItem) {
+                            DropdownMenu(
+                                expanded = true,
+                                onDismissRequest = { selectedImageForMenu = null }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("重命名") },
+                                    onClick = {
+                                        targetImageForAction = imageItem
+                                        newNameText = imageItem.name.substringBeforeLast(".")
+                                        showRenameDialog = true
+                                        selectedImageForMenu = null
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("删除") },
+                                    onClick = {
+                                        targetImageForAction = imageItem
+                                        showDeleteDialog = true
+                                        selectedImageForMenu = null
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
-    }
-    // 占位布局（跳转后当前页面无需显示内容）
-    Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(text = "正在打开文件管理器...")
+
+        // 重命名对话框
+        if (showRenameDialog) {
+            AlertDialog(
+                onDismissRequest = { showRenameDialog = false },
+                title = { Text("重命名照片") },
+                text = {
+                    OutlinedTextField(
+                        value = newNameText,
+                        onValueChange = { newNameText = it },
+                        label = { Text("新文件名") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            targetImageForAction?.let { item ->
+                                try {
+                                    val values = ContentValues().apply {
+                                        put(MediaStore.Images.Media.DISPLAY_NAME, "$newNameText.jpg")
+                                    }
+                                    context.contentResolver.update(item.uri, values, null, null)
+                                    loadImages()
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "重命名失败", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            showRenameDialog = false
+                            targetImageForAction = null
+                        }
+                    ) {
+                        Text("确定")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showRenameDialog = false }) {
+                        Text("取消")
+                    }
+                }
+            )
+        }
+
+        // 删除确认对话框
+        if (showDeleteDialog) {
+            AlertDialog(
+                onDismissRequest = { showDeleteDialog = false },
+                title = { Text("删除照片") },
+                text = { Text("确定要彻底删除这张照片吗？") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            targetImageForAction?.let { item ->
+                                try {
+                                    context.contentResolver.delete(item.uri, null, null)
+                                    images.remove(item)
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "删除失败", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            showDeleteDialog = false
+                            targetImageForAction = null
+                        }
+                    ) {
+                        Text("确定", color = Color.Red)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteDialog = false }) {
+                        Text("取消")
+                    }
+                }
+            )
+        }
+
+        // 全屏预览
+        selectedImageForPreview?.let { imageItem ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.9f))
+                    .pointerInput(Unit) {
+                        detectTapGestures(onTap = { selectedImageForPreview = null })
+                    }
+            ) {
+                AsyncImage(
+                    model = imageItem.uri,
+                    contentDescription = imageItem.name,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize().align(Alignment.Center)
+                )
+                Text(
+                    text = imageItem.name,
+                    color = Color.White,
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 40.dp, start = 16.dp, end = 16.dp),
+                    style = TextStyle(fontSize = 16.sp)
+                )
+            }
+        }
     }
 }
 
