@@ -6,14 +6,12 @@ plugins {
 
 android {
     namespace = "com.banyunlai.low_camera"
-    compileSdk {
-        version = release(36)
-    }
+    compileSdk = 34
 
     defaultConfig {
         applicationId = "com.banyunlai.low_camera"
         minSdk = 34
-        targetSdk = 36
+        targetSdk = 34
         versionCode = 1
         versionName = "1.0"
 

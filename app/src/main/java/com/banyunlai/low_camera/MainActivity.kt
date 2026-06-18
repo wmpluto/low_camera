@@ -246,7 +246,7 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                 OutlinedTextField(
                     value = purpose,
                     onValueChange = { purpose = it },
-                    label = { Text("目的") },
+                    label = { Text("目的地址") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
                     modifier = Modifier.weight(1f).padding(horizontal = 4.dp)
                 )
@@ -268,9 +268,9 @@ fun CameraScreen(modifier: Modifier = Modifier) {
                     if (imageCapture != null) {
                         // 获取当前的分钟和秒数
                         val currentTime = SimpleDateFormat("mmss", Locale.US).format(System.currentTimeMillis())
-                        // 组合文件名：选择年月日_当前的分钟秒数_目的_地址_金额
+                        // 组合文件名：选择年月日_当前的分钟秒数_地址_目的_金额
                         val formattedDate = "${selectedYear}${selectedMonth.toString().padStart(2, '0')}${selectedDay.toString().padStart(2, '0')}"
-                        val combinedFileName = "${formattedDate}${currentTime}_${purpose.text}_${address.text.replace(" ", "_")}_${amount.text}"
+                        val combinedFileName = "${formattedDate}${currentTime}_${address.text.replace(" ", "_")}_${purpose.text}_${amount.text}"
                         takePhoto(imageCapture, combinedFileName.replace(" ", ""), context)
                     } else {
                         Toast.makeText(context, "无法拍照，请检查相机权限", Toast.LENGTH_SHORT).show()
